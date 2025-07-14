@@ -3,6 +3,7 @@ from pathlib import Path
 import json
 import time
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 
 class CollectionError(Exception):
@@ -235,14 +236,17 @@ class Collection:
         :return: A list of dictionaries, where each dictionary is a document.
         :rtype: List[Dict]
         """
-        docs = []
-        for filepath in self.path.glob("*.json"):
+        def read_file(filepath):
             try:
                 with open(filepath, "r", encoding="utf-8") as f:
-                    docs.append(json.load(f))
+                    return json.load(f)
             except (json.JSONDecodeError, IOError):
-                continue
-        return docs
+                return None
+
+        filepaths = list(self.path.glob("*.json"))
+        with ThreadPoolExecutor() as executor:
+            results = executor.map(read_file, filepaths)
+            return [doc for doc in results if doc is not None]
 
     def _get_from_index(self, lookup: Dict) -> Optional[List[str]]:
         """
@@ -413,7 +417,7 @@ class Collection:
                 data.pop(self.primary_key, None)
             
             updated_data = {**existing_doc, **data} if upsert else {**data, self.primary_key: doc_id}
-            if self.timestamp_documents and "updated_at" not in updated_data:
+            if self.timestamp_documents:
                 updated_data["updated_at"] = time.time()
         else:
             if isinstance(lookup, str):
